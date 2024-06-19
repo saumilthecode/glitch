@@ -1,25 +1,227 @@
+<!DOCTYPE html>
 <html>
   <head>
+    <title>Racing Game</title>
     <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <script src="https://cdn.rawgit.com/donmccurdy/aframe-extras/v6.0.0/dist/aframe-extras.min.js"></script>
+    <style>
+      body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    </style>
+    <script>
+      AFRAME.registerComponent('vehicle-controls', {
+        schema: {
+          steering: { type: 'number', default: 20 },
+          acceleration: { type: 'number', default: 60 },
+          deceleration: { type: 'number', default: 20 }
+        },
+
+        init: function () {
+          this.velocity = new THREE.Vector3(0, 0, 0); // Ensure initial velocity is zero
+          this.direction = 0; // 0: straight, -1: left, 1: right
+          this.isAccelerating = false;
+
+          window.addEventListener('keydown', this.onKeyDown.bind(this));
+          window.addEventListener('keyup', this.onKeyUp.bind(this));
+        },
+
+        tick: function (time, delta) {
+          const el = this.el;
+          const data = this.data;
+          const acceleration = data.acceleration;
+          const deceleration = data.deceleration;
+          const velocity = this.velocity;
+
+          // Apply steering
+          if (this.direction !== 0) {
+            el.object3D.rotation.y += this.direction * data.steering * delta / 1000;
+          }
+
+          // Apply acceleration
+          if (this.isAccelerating) {
+            velocity.z -= acceleration * delta / 1000;
+          } else {
+            velocity.z += deceleration * delta / 1000;
+          }
+
+          // Ensure velocity stops when keys are not pressed
+          if (!this.isAccelerating && velocity.z > 0) {
+            velocity.z = 0;
+          }
+
+          // Limit maximum speed
+          if (velocity.z < -60) {
+            velocity.z = -60;
+          }
+
+          // Move the car
+          el.object3D.translateZ(velocity.z * delta / 1000);
+        },
+
+        onKeyDown: function (event) {
+          switch (event.code) {
+            case 'ArrowUp':
+              this.isAccelerating = true;
+              this.velocity.z = -this.data.acceleration;
+              break;
+            case 'ArrowDown':
+              this.isAccelerating = true;
+              this.velocity.z = this.data.acceleration / 2; // Slower reverse speed
+              break;
+            case 'ArrowLeft':
+              this.direction = -1;
+              break;
+            case 'ArrowRight':
+              this.direction = 1;
+              break;
+          }
+        },
+
+        onKeyUp: function (event) {
+          switch (event.code) {
+            case 'ArrowLeft':
+            case 'ArrowRight':
+              this.direction = 0;
+              break;
+            case 'ArrowUp':
+            case 'ArrowDown':
+              this.isAccelerating = false;
+              this.velocity.z = 0;
+              break;
+          }
+        }
+      });
+
+      AFRAME.registerComponent('random-terrain', {
+        schema: {
+          numTerrains: { type: 'int', default: 20 },
+          width: { type: 'number', default: 100 },
+          height: { type: 'number', default: 100 }
+        },
+
+        init: function () {
+          const sceneEl = this.el.sceneEl;
+          const terrainTypes = ['box', 'cylinder', 'sphere'];
+          for (let i = 0; i < this.data.numTerrains; i++) {
+            const terrainType = terrainTypes[Math.floor(Math.random() * terrainTypes.length)];
+            const posX = (Math.random() - 0.5) * this.data.width;
+            const posY = 0.5;
+            const posZ = (Math.random() - 0.5) * this.data.height;
+            const color = '#' + Math.floor(Math.random() * 16777215).toString(16);
+
+            const terrain = document.createElement('a-' + terrainType);
+            terrain.setAttribute('position', { x: posX, y: posY, z: posZ });
+            terrain.setAttribute('color', color);
+            terrain.setAttribute('static-body', ''); // Add physics to the terrain
+            terrain.setAttribute('class', 'obstacle'); // Add class to identify obstacles
+            sceneEl.appendChild(terrain);
+          }
+        }
+      });
+
+      AFRAME.registerComponent('collision-reset', {
+        init: function () {
+          this.el.addEventListener('collide', (e) => {
+            if (e.detail.body.el.classList.contains('obstacle')) {
+              window.location.reload();
+            }
+          });
+        }
+      });
+
+      AFRAME.registerComponent('road-spawner', {
+        schema: {
+          width: { type: 'number', default: 10 },
+          length: { type: 'number', default: 20 },
+          numSegments: { type: 'int', default: 10 }
+        },
+        init: function () {
+          this.segments = [];
+          this.spawnInitialRoad();
+        },
+        spawnInitialRoad: function () {
+          for (let i = 0; i < this.data.numSegments; i++) {
+            this.spawnRoadSegment(i * this.data.length);
+          }
+        },
+        spawnRoadSegment: function (zPosition) {
+          const road = document.createElement('a-plane');
+          road.setAttribute('position', { x: 0, y: 0, z: -zPosition });
+          road.setAttribute('rotation', { x: -90, y: 0, z: 0 });
+          road.setAttribute('width', this.data.width);
+          road.setAttribute('height', this.data.length);
+          road.setAttribute('color', '#444');
+          road.setAttribute('static-body', '');
+          this.el.appendChild(road);
+          this.segments.push(road);
+        },
+        tick: function () {
+          const car = document.querySelector('#car');
+          const carZ = car.object3D.position.z;
+          const lastSegment = this.segments[this.segments.length - 1];
+          if (carZ < lastSegment.getAttribute('position').z - this.data.length) {
+            this.spawnRoadSegment(lastSegment.getAttribute('position').z - this.data.length);
+            const firstSegment = this.segments.shift();
+            firstSegment.parentNode.removeChild(firstSegment);
+          }
+        }
+      });
+    </script>
   </head>
   <body>
-    <a-scene>
-      <a-box position="-1 0.5 -3" rotation="0 45 0" color="#4CC3D9"></a-box>
-      <a-sphere position="0 1.25 -5" radius="1.25" color="#EF2D5E"></a-sphere>
-      <a-cylinder
-        position="1 0.75 -3"
-        radius="0.5"
-        height="1.5"
-        color="#FFC65D"
-      ></a-cylinder>
-      <a-plane
-        position="0 0 -4"
-        rotation="-90 0 0"
-        width="4"
-        height="4"
-        color="#7BC8A4"
-      ></a-plane>
-      <a-sky color="#ECECEC"></a-sky>
+    <a-scene physics="gravity: 0 -9.8 0" random-terrain="numTerrains: 50; width: 200; height: 200">
+      <!-- Track -->
+      <a-entity road-spawner="width: 10; length: 20; numSegments: 10"></a-entity>
+      
+      <!-- Car Body -->
+      <a-entity id="car" position="0 0.5 0" vehicle-controls collision-reset
+                physics="mass: 200; angularDamping: 0.5; linearDamping: 0.1">
+        <a-box scale="1 0.5 2" color="#ff5733"></a-box> <!-- Main body -->
+        <a-box position="0 0.5 0" scale="0.8 0.2 1.6" color="#ff5733"></a-box> <!-- Roof -->
+        <a-cylinder position="-0.4 0.25 0.8" radius="0.2" height="0.2" color="#222" rotation="90 0 0"></a-cylinder> <!-- Front left wheel -->
+        <a-cylinder position="0.4 0.25 0.8" radius="0.2" height="0.2" color="#222" rotation="90 0 0"></a-cylinder> <!-- Front right wheel -->
+        <a-cylinder position="-0.4 0.25 -0.8" radius="0.2" height="0.2" color="#222" rotation="90 0 0"></a-cylinder> <!-- Rear left wheel -->
+        <a-cylinder position="0.4 0.25 -0.8" radius="0.2" height="0.2" color="#222" rotation="90 0 0"></a-cylinder> <!-- Rear right wheel -->
+
+        <!-- Camera -->
+        <a-entity id="camera" camera position="0 1.5 4" look-controls></a-entity>
+      </a-entity>
+      
+      <!-- Start/Finish Line -->
+      <a-plane id="finish-line" position="0 0.01 -2" rotation="-90 0 0" width="1" height="4" color="#FFFFFF"></a-plane>
+      
+      <!-- Checkpoints -->
+      <a-cylinder class="checkpoint" position="-2 0.5 -6" radius="0.5" height="1" color="#FFFF00"></a-cylinder>
+      <a-cylinder class="checkpoint" position="2 0.5 -10" radius="0.5" height="1" color="#FFFF00"></a-cylinder>
+      
+      <!-- Ground -->
+      <a-plane static-body position="0 0 -4" rotation="-90 0 0" width="100" height="100" color="#888"></a-plane>
+      
+      <!-- Lighting -->
+      <a-light type="ambient" color="#888"></a-light>
+      <a-light type="directional" position="2 4 -3" intensity="0.5"></a-light>
+      
+      <!-- Controls -->
+      <a-entity id="controls" keyboard-controls></a-entity>
+      
+      <!-- Physics system -->
+      <a-entity physics-world></a-entity>
+      
+      <!-- Audio -->
+      <a-sound src="assets/engine.mp3" autoplay="true" loop="true" position="0 1 0" volume="0.3"></a-sound>
+      
+      <!-- HUD -->
+      <a-entity id="hud" position="0 2 -3">
+        <a-text id="lap-counter" value="Lap: 0/3" color="white" align="center" width="4"></a-text>
+      </a-entity>
+
+      <!-- Sign -->
+      <a-entity position="0 3 2">
+        <a-plane position="0 0 0" rotation="0 0 0" width="3" height="1" color="#222"></a-plane>
+        <a-text value="Use Arrow Keys" align="center" color="#FFF" position="0 0 0.1" width="3"></a-text>
+      </a-entity>
+      
+      <!-- Environment -->
+      <a-entity environment="preset: forest; lighting: none;"></a-entity>
     </a-scene>
   </body>
 </html>
